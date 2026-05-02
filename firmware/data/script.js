@@ -367,6 +367,84 @@ function setMqttPill(el, enabled, connected) {
   });
 })();
 
+// SD card pin configuration -- fetch current pins and allow saving
+(function () {
+  var VALID_PINS = [0,1,2,3,4,5,6,7,8,9,10,20,21];
+  var selCS     = document.getElementById('sdPinCS');
+  var selMOSI   = document.getElementById('sdPinMOSI');
+  var selCLK    = document.getElementById('sdPinCLK');
+  var selMISO   = document.getElementById('sdPinMISO');
+  var btnSdPin  = document.getElementById('btnSdPinSave');
+  var sdStatus  = document.getElementById('sdStatus');
+  var sdPinMsg  = document.getElementById('sdPinMsg');
+
+  [selCS, selMOSI, selCLK, selMISO].forEach(function (sel) {
+    VALID_PINS.forEach(function (p) {
+      var opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = 'GPIO ' + p;
+      sel.appendChild(opt);
+    });
+  });
+
+  fetch('/api/sd-pins').then(function (r) { return r.json(); }).then(function (d) {
+    selCS.value   = d.cs;
+    selMOSI.value = d.mosi;
+    selCLK.value  = d.clk;
+    selMISO.value = d.miso;
+    if (sdStatus) {
+      sdStatus.textContent = d.ready ? 'SD card ready' : 'No SD card detected or /QBit folder missing';
+      sdStatus.className = 'sd-status ' + (d.ready ? 'sd-ready' : 'sd-not-ready');
+    }
+  }).catch(function () {
+    if (sdStatus) {
+      sdStatus.textContent = 'Unable to read SD status';
+      sdStatus.className = 'sd-status sd-not-ready';
+    }
+  });
+
+  btnSdPin.addEventListener('click', function () {
+    var vals = [selCS.value, selMOSI.value, selCLK.value, selMISO.value];
+    var unique = new Set(vals);
+    if (unique.size < 4) {
+      sdPinMsg.className = 'msg error';
+      sdPinMsg.textContent = 'All four pins must be different.';
+      sdPinMsg.style.display = 'block';
+      return;
+    }
+
+    sdPinMsg.className = 'msg';
+    sdPinMsg.style.display = 'none';
+    btnSdPin.disabled = true;
+
+    var params = 'cs=' + selCS.value
+               + '&mosi=' + selMOSI.value
+               + '&clk=' + selCLK.value
+               + '&miso=' + selMISO.value;
+    fetch('/api/sd-pins?' + params, { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ok) {
+          sdPinMsg.className = 'msg ok';
+          sdPinMsg.textContent = 'Saved. Rebooting device...';
+          sdPinMsg.style.display = 'block';
+          btnSdPin.textContent = 'Rebooting...';
+        } else {
+          sdPinMsg.className = 'msg error';
+          sdPinMsg.textContent = d.error || 'Save failed.';
+          sdPinMsg.style.display = 'block';
+          btnSdPin.disabled = false;
+        }
+      })
+      .catch(function () {
+        sdPinMsg.className = 'msg error';
+        sdPinMsg.textContent = 'Connection lost (device may be rebooting).';
+        sdPinMsg.style.display = 'block';
+        btnSdPin.disabled = false;
+      });
+  });
+})();
+
 // Settings controls -- fetch current values and send changes on input
 (function () {
   var rSpeed  = document.getElementById('rSpeed');
@@ -441,6 +519,15 @@ async function ls() {
     var p = r.total ? ((r.used / r.total) * 100).toFixed(1) : '0';
     document.getElementById('sP').textContent = p;
     document.getElementById('sF').style.width  = p + '%';
+    var titleEl = document.querySelector('.card .card-title');
+    if (titleEl && r.sd !== undefined) {
+      var storageLabel = r.sd ? 'SD Card' : 'Internal';
+      if (titleEl.textContent.indexOf('Storage') === -1) {
+        // Already has custom text, skip
+      } else {
+        titleEl.textContent = 'Storage (' + storageLabel + ')';
+      }
+    }
   } catch (e) { /* ignore */ }
 }
 

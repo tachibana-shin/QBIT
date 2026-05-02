@@ -298,6 +298,30 @@
     <button class="btn btn-save" id="btnPinSave">Save Pins</button>
   </div>
 
+  <div class="card collapsible collapsed">
+    <div class="card-title">SD Card Pins</div>
+    <div class="setting">
+      <label class="setting-label">CS</label>
+      <select id="sdPinCS" class="input-select"></select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">MOSI</label>
+      <select id="sdPinMOSI" class="input-select"></select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">CLK</label>
+      <select id="sdPinCLK" class="input-select"></select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">MISO</label>
+      <select id="sdPinMISO" class="input-select"></select>
+    </div>
+    <div class="sd-status" id="sdStatus">Checking SD card...</div>
+    <div class="pin-hint">Files in /QBit on the SD card will be used for storage. Changing pins will reboot the device.</div>
+    <div class="msg" id="sdPinMsg"></div>
+    <button class="btn btn-save" id="btnSdPinSave">Save SD Pins</button>
+  </div>
+
   <script src="jszip.min.js"></script>
   <script src="script.js"></script>
 </body>

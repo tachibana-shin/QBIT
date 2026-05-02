@@ -3,10 +3,17 @@
 
 #include <Arduino.h>
 #include <U8g2lib.h>
+#include <FS.h>
 #include "gif_types.h"
 
 // Mount LittleFS and store the display pointer for rendering.
 bool gifPlayerInit(U8G2 *display);
+
+// Set the filesystem and base path for .qgif files.
+// Pass LittleFS and "/" for internal flash, or SD and "/QBit" for SD card.
+// If basePrefix is non-empty (e.g. "QBit/"), it is prepended to filenames
+// when the player opens files (used by the web dashboard for display names).
+void gifPlayerSetStorage(fs::FS &fs, const char *basePath, const char *basePrefix);
 
 // Return true if at least one .qgif file exists on LittleFS.
 bool gifPlayerHasFiles();
@@ -39,6 +46,9 @@ void gifPlayerSetFile(const String &filename);
 
 // Return the filename currently being played (empty if idle).
 String gifPlayerGetCurrentFile();
+
+// Return the current storage prefix (e.g. "QBit/" for SD, "" for internal).
+String gifPlayerGetStoragePrefix();
 
 // Set playback speed divisor (1 = normal, 2 = 2x, etc.).
 void gifPlayerSetSpeed(uint16_t divisor);

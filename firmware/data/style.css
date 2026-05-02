@@ -1028,6 +1028,33 @@ body {
   line-height: 1.5;
 }
 
+/* SD card status indicator */
+.sd-status {
+  font-size: .78em;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin: 6px 0;
+  font-weight: 500;
+}
+.sd-status.sd-ready {
+  background: rgba(76, 175, 80, .12);
+  color: var(--success);
+  border: 1px solid rgba(76, 175, 80, .2);
+}
+.sd-status.sd-not-ready {
+  background: rgba(211, 47, 47, .1);
+  color: var(--red-light);
+  border: 1px solid rgba(211, 47, 47, .2);
+}
+.light-mode .sd-status.sd-ready {
+  background: rgba(46, 125, 50, .1);
+  border-color: rgba(46, 125, 50, .2);
+}
+.light-mode .sd-status.sd-not-ready {
+  background: rgba(198, 40, 40, .08);
+  border-color: rgba(198, 40, 40, .18);
+}
+
 /* MQTT hint */
 .mqtt-hint {
   font-size: .72em;

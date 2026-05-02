@@ -1,6 +1,7 @@
 #include "web_dashboard.h"
 #include "gif_player.h"
 #include "../../src/settings.h"
+#include "../../src/sd_manager.h"
 #include "../../src/app_state.h"
 #include "../../src/network_task.h"
 #include <LittleFS.h>
@@ -22,6 +23,37 @@
 static File   _uploadFile;
 static bool   _uploadOk    = false;
 static String _uploadError;
+
+// ==========================================================================
+//  Active storage helper
+// ==========================================================================
+
+static bool _useSdStorage() {
+    return sdManagerIsReady();
+}
+
+static fs::FS& _activeFS() {
+    return _useSdStorage() ? sdManagerFS() : LittleFS;
+}
+
+static String _storageBasePath() {
+    return _useSdStorage() ? "/QBit" : "/";
+}
+
+static String _storagePrefix() {
+    return _useSdStorage() ? "QBit/" : "";
+}
+
+// Full path on the active filesystem for a given display name.
+// displayName is like "foo.qgif" (LittleFS) or "QBit/foo.qgif" (SD).
+static String _fullPathForName(const String &displayName) {
+    if (_useSdStorage()) {
+        String name = displayName;
+        if (name.startsWith("QBit/")) name = name.substring(5);
+        return "/QBit/" + name;
+    }
+    return "/" + displayName;
+}
 
 // ==========================================================================
 //  Path sanitization (prevent path traversal)
@@ -112,7 +144,9 @@ static void handleFavicon(AsyncWebServerRequest *request) {
 static void handleList(AsyncWebServerRequest *request) {
     StaticJsonDocument<2048> doc;
     JsonArray arr = doc.to<JsonArray>();
-    File root = LittleFS.open("/");
+    String basePath = _storageBasePath();
+    String prefix = _storagePrefix();
+    File root = _activeFS().open(basePath);
     if (root && root.isDirectory()) {
         String current = gifPlayerGetCurrentFile();
         File f = root.openNextFile();
@@ -122,10 +156,11 @@ static void handleList(AsyncWebServerRequest *request) {
             f.close();
             if (name.startsWith("/")) name = name.substring(1);
             if (name.endsWith(".qgif")) {
+                String displayName = prefix + name;
                 JsonObject obj = arr.add<JsonObject>();
-                obj["name"]    = name;
+                obj["name"]    = displayName;
                 obj["size"]    = sz;
-                obj["playing"] = (name == current);
+                obj["playing"] = (name == current || displayName == current);
             }
             f = root.openNextFile();
         }
@@ -137,10 +172,18 @@ static void handleList(AsyncWebServerRequest *request) {
 }
 
 static void handleStorage(AsyncWebServerRequest *request) {
-    StaticJsonDocument<128> doc;
-    doc["total"] = LittleFS.totalBytes();
-    doc["used"]  = LittleFS.usedBytes();
-    doc["free"]  = LittleFS.totalBytes() - LittleFS.usedBytes();
+    StaticJsonDocument<256> doc;
+    if (_useSdStorage()) {
+        doc["total"] = (uint64_t)sdManagerTotalBytes();
+        doc["used"]  = (uint64_t)sdManagerUsedBytes();
+        doc["free"]  = (uint64_t)(sdManagerTotalBytes() - sdManagerUsedBytes());
+        doc["sd"]    = true;
+    } else {
+        doc["total"] = LittleFS.totalBytes();
+        doc["used"]  = LittleFS.usedBytes();
+        doc["free"]  = LittleFS.totalBytes() - LittleFS.usedBytes();
+        doc["sd"]    = false;
+    }
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
@@ -188,15 +231,23 @@ static void handleUploadData(AsyncWebServerRequest *request,
             return;
         }
 
-        // Rough free-space check (exact size unknown at this point)
-        size_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
+        // Rough free-space check
+        size_t freeBytes;
+        if (_useSdStorage()) {
+            freeBytes = sdManagerTotalBytes() - sdManagerUsedBytes();
+        } else {
+            freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
+        }
         if (freeBytes < 2048) {
             _uploadOk    = false;
             _uploadError = "Insufficient storage -- delete some files first";
             return;
         }
 
-        _uploadFile = LittleFS.open("/" + basename, "w");
+        String path = _storageBasePath();
+        if (!path.endsWith("/")) path += "/";
+        path += basename;
+        _uploadFile = _activeFS().open(path, "w");
         if (!_uploadFile) {
             _uploadOk    = false;
             _uploadError = "Failed to create file";
@@ -223,15 +274,17 @@ static void handleUploadData(AsyncWebServerRequest *request,
             _uploadError = "Invalid filename";
             return;
         }
-        String path = "/" + basename;
+        String path = _storageBasePath();
+        if (!path.endsWith("/")) path += "/";
+        path += basename;
 
         if (!_uploadOk) {
-            LittleFS.remove(path);
+            _activeFS().remove(path);
             return;
         }
 
         // Validate .qgif header
-        File vf = LittleFS.open(path, "r");
+        File vf = _activeFS().open(path, "r");
         if (!vf) {
             _uploadOk = false;
             _uploadError = "Cannot reopen file";
@@ -253,12 +306,12 @@ static void handleUploadData(AsyncWebServerRequest *request,
         }
 
         if (!_uploadOk) {
-            LittleFS.remove(path);
+            _activeFS().remove(path);
             return;
         }
 
         if (gifPlayerGetCurrentFile().length() == 0)
-            gifPlayerSetFile(basename);
+            gifPlayerSetFile(_storagePrefix() + basename);
     }
 }
 
@@ -273,12 +326,12 @@ static void handleGetFile(AsyncWebServerRequest *request) {
         request->send(400, "text/plain", "Invalid name");
         return;
     }
-    String path = "/" + name;
-    if (!LittleFS.exists(path)) {
+    String path = _fullPathForName(name);
+    if (!_activeFS().exists(path)) {
         request->send(404, "text/plain", "Not found");
         return;
     }
-    request->send(LittleFS, path, "application/octet-stream");
+    request->send(_activeFS(), path, "application/octet-stream");
 }
 
 static void handleDelete(AsyncWebServerRequest *request) {
@@ -286,21 +339,27 @@ static void handleDelete(AsyncWebServerRequest *request) {
         request->send(400, "application/json", "{\"error\":\"Missing name\"}");
         return;
     }
-    String name = sanitizeFileBasename(request->getParam("name")->value());
+    String name = request->getParam("name")->value();
+    // Handle "QBit/foo.qgif" or just "foo.qgif"
+    if (_useSdStorage() && name.startsWith("QBit/")) {
+        name = name.substring(5);
+    }
+    name = sanitizeFileBasename(name);
     if (name.length() == 0) {
         request->send(400, "application/json", "{\"error\":\"Invalid name\"}");
         return;
     }
 
-    String path = "/" + name;
-    if (!LittleFS.exists(path)) {
+    String path = _fullPathForName(name);
+    if (!_activeFS().exists(path)) {
         request->send(404, "application/json", "{\"error\":\"File not found\"}");
         return;
     }
 
-    LittleFS.remove(path);
+    _activeFS().remove(path);
 
-    if (gifPlayerGetCurrentFile() == name) {
+    String currentName = gifPlayerGetCurrentFile();
+    if (currentName == name || currentName == _storagePrefix() + name) {
         String next = gifPlayerGetFirstFile();
         gifPlayerSetFile(next);
     }
@@ -353,14 +412,20 @@ static void handlePlay(AsyncWebServerRequest *request) {
         request->send(400, "application/json", "{\"error\":\"Missing name\"}");
         return;
     }
-    String name = sanitizeFileBasename(request->getParam("name")->value());
-    if (name.length() == 0) {
+    String name = request->getParam("name")->value();
+    // Handle "QBit/foo.qgif" or just "foo.qgif"
+    String bareName = name;
+    if (_useSdStorage() && name.startsWith("QBit/")) {
+        bareName = name.substring(5);
+    }
+    bareName = sanitizeFileBasename(bareName);
+    if (bareName.length() == 0) {
         request->send(400, "application/json", "{\"error\":\"Invalid name\"}");
         return;
     }
 
-    String path = "/" + name;
-    if (!LittleFS.exists(path)) {
+    String path = _fullPathForName(name);
+    if (!_activeFS().exists(path)) {
         request->send(404, "application/json", "{\"error\":\"File not found\"}");
         return;
     }
@@ -528,6 +593,58 @@ static void handlePostPins(AsyncWebServerRequest *request) {
 
     // Save and reboot (setPinConfig writes NVS then calls ESP.restart)
     setPinConfig(touch, buzzer, sda, scl);
+}
+
+// ==========================================================================
+//  Handlers -- SD Card Pin Configuration API
+// ==========================================================================
+
+static void handleGetSdPins(AsyncWebServerRequest *request) {
+    StaticJsonDocument<128> doc;
+    doc["cs"]   = getPinSdCS();
+    doc["mosi"] = getPinSdMOSI();
+    doc["clk"]  = getPinSdCLK();
+    doc["miso"] = getPinSdMISO();
+    doc["ready"] = sdManagerIsReady();
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+}
+
+static void handlePostSdPins(AsyncWebServerRequest *request) {
+    if (!request->hasParam("cs") || !request->hasParam("mosi") ||
+        !request->hasParam("clk")  || !request->hasParam("miso")) {
+        request->send(400, "application/json",
+                      "{\"error\":\"Missing pin parameters (cs, mosi, clk, miso)\"}");
+        return;
+    }
+
+    uint8_t cs   = (uint8_t)request->getParam("cs")->value().toInt();
+    uint8_t mosi = (uint8_t)request->getParam("mosi")->value().toInt();
+    uint8_t clk  = (uint8_t)request->getParam("clk")->value().toInt();
+    uint8_t miso = (uint8_t)request->getParam("miso")->value().toInt();
+
+    // Validate: all pins must be in the allowed set
+    if (!isValidPin(cs) || !isValidPin(mosi) ||
+        !isValidPin(clk)  || !isValidPin(miso)) {
+        request->send(400, "application/json",
+                      "{\"error\":\"Invalid GPIO pin number\"}");
+        return;
+    }
+
+    // Validate: all 4 pins must be distinct
+    if (cs == mosi || cs == clk || cs == miso ||
+        mosi == clk || mosi == miso || clk == miso) {
+        request->send(400, "application/json",
+                      "{\"error\":\"All four pins must be different\"}");
+        return;
+    }
+
+    // Send response before reboot
+    request->send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
+
+    // Save and reboot (setSdPinConfig writes NVS then calls ESP.restart)
+    setSdPinConfig(cs, mosi, clk, miso);
 }
 
 // ==========================================================================
@@ -858,6 +975,8 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/mqtt",          HTTP_POST, handlePostMqtt);
     server.on("/api/pins",          HTTP_GET,  handleGetPins);
     server.on("/api/pins",          HTTP_POST, handlePostPins);
+    server.on("/api/sd-pins",       HTTP_GET,  handleGetSdPins);
+    server.on("/api/sd-pins",       HTTP_POST, handlePostSdPins);
     server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
     server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
     // Register more specific weather route first to avoid accidental prefix captures.
@@ -865,17 +984,20 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/weather",       HTTP_GET,  handleGetWeather);
     server.on("/api/weather",       HTTP_POST, handlePostWeather);
 
-    // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
+    // Catch-all: serve .qgif files from active storage for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {
         if (request->method() != HTTP_GET) {
             request->send(404, "text/plain", "Not found");
             return;
         }
         String path = normalizeQgifPath(request->url());
-        if (path.length() > 0 && LittleFS.exists(path)) {
-            request->send(LittleFS, path, "application/octet-stream");
-        } else {
-            request->send(404, "text/plain", "Not found");
+        if (path.length() > 0) {
+            String fullPath = _fullPathForName(path.substring(1));
+            if (_activeFS().exists(fullPath)) {
+                request->send(_activeFS(), fullPath, "application/octet-stream");
+                return;
+            }
         }
+        request->send(404, "text/plain", "Not found");
     });
 }
