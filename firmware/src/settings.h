@@ -31,6 +31,13 @@ uint8_t getPinSDA();
 uint8_t getPinSCL();
 void    setPinConfig(uint8_t touch, uint8_t buzzer, uint8_t sda, uint8_t scl);
 
+// --- SD card pin configuration ---
+uint8_t getPinSdCS();
+uint8_t getPinSdMOSI();
+uint8_t getPinSdCLK();
+uint8_t getPinSdMISO();
+void    setSdPinConfig(uint8_t cs, uint8_t mosi, uint8_t clk, uint8_t miso);
+
 // --- Display brightness ---
 void    setDisplayBrightnessVal(uint8_t val);
 uint8_t getDisplayBrightnessVal();

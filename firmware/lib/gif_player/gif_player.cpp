@@ -28,6 +28,11 @@ static String        _requestedFile;
 static bool          _fileChanged   = false;
 static uint16_t      _speedDivisor  = 1;
 
+// --- Storage abstraction ---
+static fs::FS *_storageFS   = &LittleFS;
+static String  _storagePath = "/";        // e.g. "/" for LittleFS, "/QBit" for SD
+static String  _storagePrefix;             // e.g. "" for LittleFS, "QBit/" for SD
+
 // --- Shuffle bag (fair random) ---
 static String        _shuffleBag[QGIF_MAX_FRAMES];
 static uint8_t       _shuffleTotal  = 0;   // number of files in the bag
@@ -55,8 +60,10 @@ static bool _openFile(const String &filename) {
   if (_file) _file.close();
   _playing = false;
 
-  String path = "/" + filename;
-  _file = LittleFS.open(path, "r");
+  String path = _storagePath;
+  if (!path.endsWith("/")) path += "/";
+  path += filename;
+  _file = _storageFS->open(path, "r");
   if (!_file) {
     Serial.println("gifPlayer: cannot open " + path);
     return false;
@@ -122,8 +129,15 @@ bool gifPlayerInit(U8G2 *display) {
   return true;
 }
 
+void gifPlayerSetStorage(fs::FS &fs, const char *basePath, const char *basePrefix) {
+  _storageFS     = &fs;
+  _storagePath   = basePath;
+  _storagePrefix = basePrefix;
+  Serial.printf("gifPlayer: Storage set to %s (prefix: %s)\n", basePath, basePrefix);
+}
+
 bool gifPlayerHasFiles() {
-  File root = LittleFS.open("/");
+  File root = _storageFS->open(_storagePath);
   if (!root || !root.isDirectory()) return false;
   File f = root.openNextFile();
   while (f) {
@@ -137,7 +151,7 @@ bool gifPlayerHasFiles() {
 }
 
 String gifPlayerGetFirstFile() {
-  File root = LittleFS.open("/");
+  File root = _storageFS->open(_storagePath);
   if (!root || !root.isDirectory()) return "";
   File f = root.openNextFile();
   while (f) {
@@ -155,7 +169,7 @@ String gifPlayerGetFirstFile() {
 }
 
 String gifPlayerGetNextFile(const String &current) {
-  File root = LittleFS.open("/");
+  File root = _storageFS->open(_storagePath);
   if (!root || !root.isDirectory()) return "";
 
   // Collect all .qgif filenames
@@ -190,7 +204,7 @@ String gifPlayerGetNextFile(const String &current) {
 // ---------------------------------------------------------------------------
 
 void gifPlayerBuildShuffleBag() {
-  File root = LittleFS.open("/");
+  File root = _storageFS->open(_storagePath);
   if (!root || !root.isDirectory()) { _shuffleTotal = 0; return; }
 
   _shuffleTotal = 0;
@@ -280,6 +294,10 @@ String gifPlayerGetCurrentFile() {
   String f = _currentFile;
   if (gifPlayerMutex) xSemaphoreGive(gifPlayerMutex);
   return f;
+}
+
+String gifPlayerGetStoragePrefix() {
+  return _storagePrefix;
 }
 
 void gifPlayerSetSpeed(uint16_t divisor) {

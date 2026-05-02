@@ -9,10 +9,13 @@
 #include <Wire.h>
 #include <NetWizard.h>
 #include <ESPmDNS.h>
+#include <LittleFS.h>
+#include <SD.h>
 #include <new>
 
 #include "app_state.h"
 #include "settings.h"
+#include "sd_manager.h"
 #include "display_helpers.h"
 #include "gif_player.h"
 #include "web_dashboard.h"
@@ -64,12 +67,20 @@ void setup() {
 
     // 5. GIF player + idle animation
     gifPlayerInit(&u8g2);
+
+    // 6. SD card -- mount and switch gif player storage if /QBit exists
+    if (sdManagerInit()) {
+        gifPlayerSetStorage(SD, "/QBit", "QBit/");
+    } else {
+        gifPlayerSetStorage(LittleFS, "/", "");
+    }
+
     gifPlayerSetIdleAnimation(&sys_idle_gif);
 
-    // 6. Start display task early so boot animation runs while WiFi and server init in parallel
+    // 7. Start display task early so boot animation runs while WiFi and server init in parallel
     xTaskCreate(displayTask, "display", 8192, NULL, 2, NULL);
 
-    // 7. NetWizard (NON_BLOCKING) with MAC-derived AP password
+    // 8. NetWizard (NON_BLOCKING) with MAC-derived AP password
     String apPwd = getApPassword();
 
     NW.onConnectionStatus([](NetWizardConnectionStatus status) {
@@ -95,12 +106,12 @@ void setup() {
     // Apply AP RF stability for ESP32-C3 PCB antenna after NetWizard (fixes #2). Does not change mode; AP_STA kept for portal.
     wifiApplyApRfStabilityForPcbAntenna();
 
-    // 8. mDNS
+    // 9. mDNS
     if (MDNS.begin("qbit")) {
         MDNS.addService("http", "tcp", 80);
     }
 
-    // 9. Web dashboard + server
+    // 10. Web dashboard + server
     webDashboardInit(server);
     // Wire cam WebSocket connect/disconnect → display task state machine
     webCamSetCallbacks(
@@ -125,7 +136,7 @@ void setup() {
 
     Serial.println("Web server started");
 
-    // 10. Launch network and input tasks
+    // 11. Launch network and input tasks
     xTaskCreate(networkTask, "network", 8192, NULL, 1, NULL);
     xTaskCreate(inputTask,   "input",   2048, NULL, 3, NULL);
 }

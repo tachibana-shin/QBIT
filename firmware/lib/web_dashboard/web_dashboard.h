@@ -2,6 +2,7 @@
 #define WEB_DASHBOARD_H
 
 #include <ESPAsyncWebServer.h>
+#include <FS.h>
 
 // Register all QBIT dashboard routes on the shared AsyncWebServer.
 //
@@ -57,6 +58,14 @@ extern uint8_t  getPinSCL();
 extern void     setPinConfig(uint8_t touch, uint8_t buzzer,
                              uint8_t sda, uint8_t scl);
 
+// SD card pin configuration -- implemented by settings.cpp.
+extern uint8_t  getPinSdCS();
+extern uint8_t  getPinSdMOSI();
+extern uint8_t  getPinSdCLK();
+extern uint8_t  getPinSdMISO();
+extern void     setSdPinConfig(uint8_t cs, uint8_t mosi,
+                               uint8_t clk, uint8_t miso);
+
 // Timezone -- implemented by settings.cpp / time_manager.cpp.
 extern String  getTimezoneIANA();
 extern void    setTimezoneIANA(const String &tz);
@@ -97,5 +106,9 @@ void webCamConsumeFrame(uint8_t *dst);
 // Close all connected cam WebSocket clients (e.g. called from display task
 // when the user taps the device to exit cam view).
 void webCamDisconnectAll();
+
+// GIF player storage -- implemented by gif_player.cpp.
+extern void  gifPlayerSetStorage(fs::FS &fs, const char *basePath, const char *basePrefix);
+extern String gifPlayerGetStoragePrefix();
 
 #endif // WEB_DASHBOARD_H

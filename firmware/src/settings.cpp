@@ -26,6 +26,12 @@ static uint8_t _pinBuzzer = 2;
 static uint8_t _pinSDA    = 20;
 static uint8_t _pinSCL    = 21;
 
+// SD card pin defaults (custom SPI)
+static uint8_t _pinSdCS   = 4;
+static uint8_t _pinSdMOSI = 3;
+static uint8_t _pinSdCLK  = 2;
+static uint8_t _pinSdMISO = 1;
+
 // Display
 static uint8_t _brightness = 0x80;
 
@@ -133,6 +139,15 @@ void settingsInit() {
 
     Serial.printf("GPIO pins: touch=%u buzzer=%u sda=%u scl=%u\n",
                   _pinTouch, _pinBuzzer, _pinSDA, _pinSCL);
+
+    // Read SD card pin config
+    _pinSdCS   = _prefs.getUChar("sdCS",   4);
+    _pinSdMOSI = _prefs.getUChar("sdMOSI", 3);
+    _pinSdCLK  = _prefs.getUChar("sdCLK",  2);
+    _pinSdMISO = _prefs.getUChar("sdMISO", 1);
+
+    Serial.printf("SD pins: cs=%u mosi=%u clk=%u miso=%u\n",
+                  _pinSdCS, _pinSdMOSI, _pinSdCLK, _pinSdMISO);
 }
 
 void loadSettings() {
@@ -228,6 +243,10 @@ void saveSettings() {
     _prefs.putUChar("pinBuzzer", _pinBuzzer);
     _prefs.putUChar("pinSDA",    _pinSDA);
     _prefs.putUChar("pinSCL",    _pinSCL);
+    _prefs.putUChar("sdCS",      _pinSdCS);
+    _prefs.putUChar("sdMOSI",    _pinSdMOSI);
+    _prefs.putUChar("sdCLK",     _pinSdCLK);
+    _prefs.putUChar("sdMISO",    _pinSdMISO);
     _prefs.putString("tzName",   _tzIANA);
     _prefs.putBool("flipMode",   _flipMode);
     _prefs.putBool("negGif",     _negativeGif);
@@ -253,6 +272,10 @@ uint8_t getPinTouch()  { return _pinTouch; }
 uint8_t getPinBuzzer() { return _pinBuzzer; }
 uint8_t getPinSDA()    { return _pinSDA; }
 uint8_t getPinSCL()    { return _pinSCL; }
+uint8_t getPinSdCS()   { return _pinSdCS; }
+uint8_t getPinSdMOSI() { return _pinSdMOSI; }
+uint8_t getPinSdCLK()  { return _pinSdCLK; }
+uint8_t getPinSdMISO() { return _pinSdMISO; }
 
 void setPinConfig(uint8_t touch, uint8_t buzzer, uint8_t sda, uint8_t scl) {
     if (!_prefsReady) return;
@@ -267,6 +290,23 @@ void setPinConfig(uint8_t touch, uint8_t buzzer, uint8_t sda, uint8_t scl) {
     _prefs.putUChar("pinSCL",    _pinSCL);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Pin config saved -- rebooting...");
+    delay(500);
+    ESP.restart();
+}
+
+void setSdPinConfig(uint8_t cs, uint8_t mosi, uint8_t clk, uint8_t miso) {
+    if (!_prefsReady) return;
+    if (xSemaphoreTake(_prefsMutex, portMAX_DELAY) != pdTRUE) return;
+    _pinSdCS   = cs;
+    _pinSdMOSI = mosi;
+    _pinSdCLK  = clk;
+    _pinSdMISO = miso;
+    _prefs.putUChar("sdCS",   _pinSdCS);
+    _prefs.putUChar("sdMOSI", _pinSdMOSI);
+    _prefs.putUChar("sdCLK",  _pinSdCLK);
+    _prefs.putUChar("sdMISO", _pinSdMISO);
+    xSemaphoreGive(_prefsMutex);
+    Serial.println("SD pin config saved -- rebooting...");
     delay(500);
     ESP.restart();
 }
